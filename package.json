@@ -1,0 +1,58 @@
+{
+  "name": "dsh-session-mover",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH session mover plugin: move sessions between workspaces safely (frame-level zstd header rewrite + byte-level verification + full-directory backup + live membership update through the official entity API).",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node tests/unit.mjs && node tests/host.test.mjs",
+    "check": "node --check lib/migrate.js && node --check lib/index.js && node --check lib/client.js && npm test"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "session",
+    "workspace",
+    "migration",
+    "move-session",
+    "zstd"
+  ],
+  "author": "yvban",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yvban/dsh-session-mover.git"
+  },
+  "homepage": "https://github.com/yvban/dsh-session-mover#readme",
+  "bugs": {
+    "url": "https://github.com/yvban/dsh-session-mover/issues"
+  }
+}
