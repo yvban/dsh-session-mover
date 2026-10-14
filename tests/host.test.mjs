@@ -52,8 +52,12 @@ function makeRes() {
   return res;
 }
 
-/** 模拟一个足够真实的 ctx：路由收集 + 工作区实体 + 可断言的调用记录。 */
-function makeCtx({ root, workspaces, liveIds = [], sessionQuery }) {
+/**
+ * 模拟一个足够真实的 ctx：路由收集 + 工作区实体 + 可断言的调用记录。
+ * @param silentAttach - true 时 attachSession 静默无效（模拟上游 mutate 的 canonical-cwd
+ *   过滤把成员丢掉的情形），用来验证插件不会把它误报成"热更新成功"。
+ */
+function makeCtx({ root, workspaces, liveIds = [], sessionQuery, silentAttach = false }) {
   const routes = new Map();
   const memberships = new Map(workspaces.map(ws => [ws.workspaceId, new Set(ws.sessionIds)]));
   const calls = { attach: [], detach: [], indexHeader: [], titleQuery: [] };
@@ -66,6 +70,7 @@ function makeCtx({ root, workspaces, liveIds = [], sessionQuery }) {
       get sessionIds() { return [...memberships.get(ws.workspaceId)]; },
       async attachSession(sessionId) {
         calls.attach.push([ws.workspaceId, sessionId]);
+        if (silentAttach) return;
         memberships.get(ws.workspaceId).add(sessionId);
       },
       async detachSession(sessionId) {
@@ -289,6 +294,65 @@ await test('标题优先取投影缓存，缺失的用 sessionQuery 兜底；并
   assert.equal(byId.get(ID_A).workspaceId, 'ws-alpha');
   assert.equal(byId.get(ID_B).workspaceTitle, null, '未登记的会话应显示为未分组');
   rmSync(home2, { recursive: true, force: true });
+});
+
+console.log('\n== host 插件：归属更新必须被证实 ==');
+await test('attachSession 静默无效时不得报 hot，要退到磁盘兜底并如实说明', async () => {
+  const home3 = mkdtempSync(join(tmpdir(), 'dsh-mover-membership-'));
+  const root3 = join(home3, 'sessions');
+  const id = 'session-silent-attach';
+  const dir = join(root3, m.projectKey(SRC_CWD), m.encodeSegment(id));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), Buffer.concat([
+    compress(line(makeHeader(id, SRC_CWD, 4))),
+    compress(line({ type: 'event', seq: 0 })),
+  ]));
+  // 磁盘兜底要用的注册表
+  const stamp = new Date().toISOString();
+  mkdirSync(join(home3, 'storages'), { recursive: true });
+  writeFileSync(join(home3, 'storages', 'workspace.json'), JSON.stringify({
+    tables: {
+      workspaces: {
+        'ws-alpha': { path: SRC_CWD, title: 'alpha', sessionIds: [id], createdAt: stamp, updatedAt: stamp },
+        'ws-beta': { path: DST_CWD, title: 'beta', sessionIds: [], createdAt: stamp, updatedAt: stamp },
+      },
+    },
+    global: {
+      initialized: true, workspaceIds: ['ws-alpha', 'ws-beta'],
+      archivedSessionIds: [], pinnedSessionIds: [], defaultWorkspaceId: 'ws-alpha',
+    },
+  }, null, 2), 'utf8');
+
+  const { ctx, routes, memberships } = makeCtx({
+    root: root3,
+    workspaces: [
+      { workspaceId: 'ws-alpha', title: 'alpha', path: SRC_CWD, sessionIds: [id] },
+      { workspaceId: 'ws-beta', title: 'beta', path: DST_CWD, sessionIds: [] },
+    ],
+    silentAttach: true,
+  });
+  apply(ctx);
+  const res = makeRes();
+  await routes.get('/plugins/dsh-session-mover/migrate')(
+    makeReq({
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-dsh-session-mover': 'session-mover' },
+      body: { sessionId: id, targetWorkspaceId: 'ws-beta' },
+    }), res);
+
+  assert.equal(res.status, 200);
+  assert.notEqual(res.body.membership.mode, 'hot', '静默失效绝不能被报成热更新成功');
+  assert.equal(res.body.membership.mode, 'disk');
+  assert.equal(res.body.membership.verified, false);
+  assert.ok(String(res.body.membership.error).includes('仍然没有该会话'), '应给出可诊断的原因');
+  // 文件仍然搬走了（迁移本身成功），只是归属需要重启
+  assert.equal(existsSync(join(root3, m.projectKey(DST_CWD), m.encodeSegment(id), 'session.v4.jsonl.zstd')), true);
+  // 磁盘兜底确实写对了
+  const reg = JSON.parse(readFileSync(join(home3, 'storages', 'workspace.json'), 'utf8'));
+  assert.ok(reg.tables.workspaces['ws-beta'].sessionIds.includes(id), '兜底应把会话写进目标工作区');
+  assert.ok(!reg.tables.workspaces['ws-alpha'].sessionIds.includes(id), '兜底应把它从旧工作区摘掉');
+  assert.equal(memberships.get('ws-beta').has(id), false, '内存里确实没生效（这正是要检测出来的情形）');
+  rmSync(home3, { recursive: true, force: true });
 });
 
 console.log('\n== host 插件：帧结构修复入口 ==');

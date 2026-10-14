@@ -96,7 +96,7 @@ node --check lib/migrate.js
 node --check lib/index.js
 node --check lib/client.js
 node tests/unit.mjs        # 12 项
-node tests/host.test.mjs   # 9 项
+node tests/host.test.mjs   # 10 项
 ```
 
 覆盖内容：
@@ -109,6 +109,8 @@ node tests/host.test.mjs   # 9 项
 - host 集成测试：用模拟 ctx 真实跑通 `apply()` → 路由注册 → 鉴权（跨站 403、缺确认头 403）→
   迁移成功（`attach`/`detach`/`indexHeader` 调用与文件落位都有断言）→ 打开中的会话 409 → 修复入口；
 - 标题优先级：缓存命中直接用，缓存缺失才查 `sessionQuery`，并断言**命中过的不会重复查**；
+- **归属更新必须被证实**：模拟上游 `attachSession` 静默无效（成员被 canonical-cwd 过滤丢掉）时，
+  插件必须报 `disk` 而不是 `hot`，并如实说明需要重启——避免"报成功但侧边栏没有"；
 - **真实 DSH 会话根目录的只读回归**（本机 31/31 可定位、可读；没有真实目录时自动跳过）。
 
 ## License
